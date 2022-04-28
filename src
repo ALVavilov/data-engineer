@@ -1,0 +1,99 @@
+
+-- Создание представлений
+
+create or replace view analysis.orderitems as 
+select * 
+from production.orderitems;
+
+create or replace view analysis.orders as 
+select * 
+from production.orders;
+
+create or replace view analysis.orderstatuses as 
+select *
+from production.orderstatuses;
+
+create or replace view analysis.orderstatuslog as 
+select *
+from production.orderstatuslog;
+
+create or replace view analysis.products as
+select *
+from production.products;
+
+create or replace view analysis.users as 
+select *
+from production.users;
+
+
+-- Создание таблицы
+
+truncate analysis.dm_rfm_segments;
+create table if not exists analysis.dm_rfm_segments (
+	user_id int4,
+	recency int2,
+	frequency int2,
+	monetary_value int2
+);
+
+
+-- Заполнение таблицы
+
+insert into analysis.dm_rfm_segments
+select
+	id,
+	ntile(5) over (order by rnk_rev desc) as recency,
+	ntile(5) over (order by rnk_orders desc) as frequency,
+	ntile(5) over (order by rnk_payment desc) as monetary_value 
+from 
+	(
+		select
+			u.id,
+			mx_dt_order,
+			cnt_orders,
+			total_pay,
+			row_number() over (order by mx_dt_order desc nulls last) as rnk_rev,
+			row_number() over (order by cnt_orders desc nulls last) as rnk_orders,
+			row_number() over (order by total_pay desc nulls last) as rnk_payment
+		from analysis.users u 
+			left join 
+				(
+					select
+						o.user_id,
+						max(o.order_ts) as mx_dt_order,
+						count(o.user_id) as cnt_orders,
+						sum(o.payment) as total_pay
+					from analysis.orders o 
+					where o.status = 4
+					group by 1
+				) o on u.id = o.user_id 
+	) as rec
+;
+
+
+-- Пересоздаем представление analysis.orders
+
+create or replace view analysis.orders as 
+select 
+	o.order_id,
+	o.order_ts,
+	o.user_id,
+	o.bonus_payment,
+	o.payment,
+	o."cost",
+	o.bonus_grant,
+	o2.status_id as status
+from production.orders o
+	left join production.orderstatuslog o2 
+		on o2.order_id = o.order_id and o.order_ts = o2.dttm 
+;
+
+
+-- Проверка витрина
+
+select * from analysis.dm_rfm_segments;
+
+
+-- Проверка представления
+
+select * from analysis.orders;
